@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "python",
+    "editor.formatOnSave": true,
+    "editor.rulers": [100],
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true
+}

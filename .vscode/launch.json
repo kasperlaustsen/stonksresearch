@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Scrape all sites",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/news_scraper.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Scrape one site",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/news_scraper.py",
+            "args": ["${input:siteSlug}"],
+            "console": "integratedTerminal"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "siteSlug",
+            "type": "promptString",
+            "description": "Site slug to scrape (e.g. anthropic, openai)"
+        }
+    ]
+}
