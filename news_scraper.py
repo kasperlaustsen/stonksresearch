@@ -52,7 +52,7 @@ except ImportError:
 
 REQUEST_DELAY = 0.5
 TIMEOUT = 30
-HEADERS = {"User-Agent": "PressReleaseArchiver/1.0 (personal archive)"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 # Tags we always strip from article HTML before converting to markdown
 NOISE_SELECTORS = ["nav", "footer", "header", "script", "style", "noscript",
@@ -84,8 +84,19 @@ class SiteConfig:
 
 # ---------- fetching ----------
 
-def fetch_requests(url: str) -> str:
-    r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+def fetch_requests(url: str, is_xml: bool = False) -> str:
+    if is_xml:
+        headers = {**HEADERS, "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8"}
+    else:
+        headers = {
+            **HEADERS,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+    r = requests.get(url, headers=headers, timeout=TIMEOUT)
     r.raise_for_status()
     return r.text
 
@@ -136,14 +147,26 @@ def looks_empty(html: str) -> bool:
 
 
 def fetch_article(url: str, js_rendered: bool) -> str:
-    """Fetch with requests; fall back to Playwright if the page looks empty."""
-    html = fetch_requests(url)
-    if (js_rendered or looks_empty(html)) and PLAYWRIGHT_AVAILABLE:
+    """Fetch with requests; fall back to Playwright if the page looks empty or blocked."""
+    html = None
+    try:
+        html = fetch_requests(url)
+    except Exception:
+        pass  # will fall back to Playwright below
+
+    need_fallback = html is None or js_rendered or looks_empty(html)
+
+    if need_fallback and PLAYWRIGHT_AVAILABLE:
         try:
             return fetch_playwright(url)
         except Exception as e:
-            print(f"  ! Playwright fallback failed ({e}); using requests result", file=sys.stderr)
-    elif js_rendered and not PLAYWRIGHT_AVAILABLE:
+            if html is not None:
+                print(f"  ! Playwright fallback failed ({e}); using requests result", file=sys.stderr)
+                return html
+            raise  # no requests result either, propagate
+    elif need_fallback and not PLAYWRIGHT_AVAILABLE:
+        if html is None:
+            raise RuntimeError("Blocked (403) and Playwright not available")
         print("  ! Site needs JS but Playwright isn't installed; result may be empty",
               file=sys.stderr)
     return html
@@ -163,7 +186,7 @@ def discover_urls(site: SiteConfig) -> list[str]:
             continue
         seen.add(sm_url)
         try:
-            xml = fetch_requests(sm_url)
+            xml = fetch_requests(sm_url, is_xml=True)
         except Exception as e:
             print(f"  ! Failed {sm_url}: {e}", file=sys.stderr)
             continue
@@ -357,19 +380,33 @@ SITES: list[SiteConfig] = [
         path_prefixes=["/news/"],
         js_rendered=False,
     ),
+    # NOTE: OpenAI is behind Cloudflare JS challenge — requires a real browser
+    # (Playwright) to scrape. If Playwright can't launch, articles will fail
+    # with 403. To use: pip install playwright && playwright install chromium
     SiteConfig(
         slug="openai",
         name="OpenAI",
         base_url="https://openai.com",
         sitemap_url="https://openai.com/sitemap.xml",
-        # OpenAI's blog/news lives under several prefixes — adjust as needed
-        # after a first run. /index/ is their main news index.
         path_prefixes=["/index/", "/blog/"],
-        js_rendered=True,  # JS-rendered, needs Playwright
-        # OpenAI filing pages and other non-article paths can sneak in;
-        # exclude obvious non-articles here if you spot them.
+        js_rendered=True,
         url_filter=lambda u: not any(
             seg in u for seg in ["/research/", "/careers/", "/policies/"]
+        ),
+    ),
+    SiteConfig(
+        slug="google-ai",
+        name="Google AI (Gemini)",
+        base_url="https://blog.google",
+        sitemap_url="https://blog.google/en-us/sitemap.xml",
+        path_prefixes=[
+            "/innovation-and-ai/technology/ai/",
+            "/innovation-and-ai/products/gemini-app/",
+            "/innovation-and-ai/models-and-research/google-deepmind/",
+        ],
+        js_rendered=False,
+        url_filter=lambda u: not u.rstrip("/").endswith(
+            ("/ai", "/gemini-app", "/google-deepmind")
         ),
     ),
 ]
